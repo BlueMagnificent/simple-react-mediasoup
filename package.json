@@ -1,0 +1,32 @@
+{
+  "name": "simple-mediasoup-react",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "client": "webpack-dev-server --config ./client/webpack.config.js --open --mode development --env standaloneclient",
+    "server": "nodemon --watch server server/server.js",
+    "start": "webpack --config ./client/webpack.config.js --mode production && nodemon --watch server server/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "express": "^4.19.2",
+    "mediasoup": "^3.14.8",
+    "mediasoup-client": "^3.7.12",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.8",
+    "@babel/plugin-transform-runtime": "^7.24.7",
+    "@babel/preset-env": "^7.24.8",
+    "@babel/preset-react": "^7.24.7",
+    "babel-loader": "^9.1.3",
+    "webpack": "^5.93.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.4"
+  }
+}
