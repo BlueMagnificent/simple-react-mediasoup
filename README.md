@@ -9,7 +9,7 @@ Clone the repository
 git clone https://github.com/BlueMagnificent/simple-react-mediasoup.git
 ```
 
-Navigate into the repo and Install dependencies:
+Navigate into the directory of the cloned repository and install dependencies:
 ```bash
 npm install
 ```
