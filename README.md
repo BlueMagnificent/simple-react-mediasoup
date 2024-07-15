@@ -6,7 +6,7 @@ A simple [node.js](https://nodejs.org) [mediasoup](https://mediasoup.org) applic
 ### How To
 Clone the repository 
 ```Bash
-git clone 
+git clone https://github.com/BlueMagnificent/simple-react-mediasoup.git
 ```
 
 Navigate into the repo and Install dependencies:
