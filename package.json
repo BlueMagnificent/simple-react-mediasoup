@@ -1,16 +1,13 @@
 {
   "name": "simple-react-mediasoup",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
     "client": "webpack-dev-server --config ./client/webpack.config.js --open --mode development --env standaloneclient",
-    "server": "nodemon --watch server server/server.js",
-    "start": "webpack --config ./client/webpack.config.js --mode production && nodemon --watch server server/server.js"
+    "server": "node server/server.js",
+    "start": "webpack --config ./client/webpack.config.js --mode production && node server/server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": ["mediasoup", "react", "webrtc"],
+  "description": "A simple nodejs mediasoup application with a react frontend",
   "dependencies": {
     "express": "^4.19.2",
     "mediasoup": "^3.14.8",
