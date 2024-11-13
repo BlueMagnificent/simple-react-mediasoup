@@ -14,7 +14,9 @@ Navigate into the directory of the cloned repository and install dependencies:
 npm install
 ```
 
-In `config.js`, update `server.wrtc.ip` to the right IP address for your network and then run:
+In `config.js`, update `server.wrtc.ip` to the right IP address for your network.
+
+ and then run:
 ```bash
 npm start
 ```
@@ -31,6 +33,14 @@ npm run client
 ```
 Running the client part will call-up `localhost:3031` in a browser.
 
+### External media
+This project also demonstrates how to use `PlainTransport` to pipe in external media into mediasoup. This is archieved using [gstreamer](https://gstreamer.freedesktop.org/) and hence should be installed on your system if you want to try this feature. Also update the values for `server.gstreamer.cwd` and `server.gstreamer.externalMediaPath` in `config.js` to the working directory of your installed `gstreamer` and path of the external media to play respectively. For example:
+```javascript
+gstreamer: {
+  cwd: '/gstreamer/installation/bin',
+  externalMediaPath: '/path/to/your/external/media.mp4'
+}
+```
 
 ### Installation Issues
 If you encounter any issue while installing mediasoup then please reference the [installation doc of mediasoup](https://mediasoup.org/documentation/v3/mediasoup/installation).

@@ -3,8 +3,12 @@ module.exports = {
         http: {
             port: 3030
         },
+        gstreamer: {
+            cwd: '',
+            externalMediaPath: '',
+        },
         wrtc:{
-            ip: '123.456.789.101',
+            ip: '',
             protocol: 'udp',
             port: 44444,
             logLevel : 'warn',
@@ -25,11 +29,13 @@ module.exports = {
             mediaCodecs : [ {
                 kind      : 'audio',
                 mimeType  : 'audio/opus',
+                payloadType : 100,
                 clockRate : 48000,
                 channels  : 2
             }, {
                 kind       : 'video',
                 mimeType   : 'video/VP8',
+                payloadType: 101,
                 clockRate  : 90000,
                 parameters : {
                     'x-google-start-bitrate' : 1000

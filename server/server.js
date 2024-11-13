@@ -6,24 +6,40 @@ const { v4: uuidv4 } = require('uuid');
 const SockRR = require('./libs/sockrr-server');
 const mediasoup = require('mediasoup');
 const config = require('../config');
+const gProducer = require('./libs/g-producer');
 
 const onlinePeers = new Map();
 
 let mRouter;
 let wrtcServer;
 
-start();
+const AUDIO_SSRC = 1111;
+const VIDEO_SSRC = 2222;
 
-function start() {
+start()
+.catch((err) => {
+    console.error('error:', err);
+    setTimeout(() => process.exit(1), 2000);
+});
+
+async function start() {
+
     const httpServer = createHttpServer();
 
     createSocketServer(httpServer);
     
-    setupMediasoup()
-        .catch((err) => {
-            console.error('error: could not set up mediasoup', err);
-            setTimeout(() => process.exit(1), 2000);
-        });
+    if(config.server.wrtc.ip === '') {
+        throw Error('wrtc ip not set');
+    }
+
+    await setupMediasoup();
+
+    const { cwd, externalMediaPath } = config.server.gstreamer;
+
+    // if gstreamer configuration is set up, create a plain transport stream
+    if ( cwd !== '' && externalMediaPath !== '' ) {
+        await createPlainTransportStream(cwd, externalMediaPath);
+    }
 }
 
 function createHttpServer() {
@@ -311,4 +327,81 @@ async function createWebRtcTransport() {
             dtlsParameters : transport.dtlsParameters
         }
     };
+}
+
+async function createPlainTransportPeer() {
+
+    const audioTransport = await mRouter.createPlainTransport({
+        listenIp : config.server.wrtc.ip,
+        rtcpMux  : false,
+        comedia  : true
+    });
+
+    const videoTransport = await mRouter.createPlainTransport({
+        listenIp : config.server.wrtc.ip,
+        rtcpMux  : false,
+        comedia  : true
+    });
+
+    const audioProducer = await audioTransport.produce({
+        kind          : 'audio',
+        rtpParameters : {
+            codecs : [ config.server.wrtc.mediaCodecs[0] ],
+            encodings : [ {
+                ssrc : AUDIO_SSRC
+            } ]
+        }
+    });
+
+    const videoProducer = await videoTransport.produce({
+        kind          : 'video',
+        rtpParameters : {
+            codecs : [ config.server.wrtc.mediaCodecs[1] ],
+            encodings : [ {
+                ssrc : VIDEO_SSRC
+            } ]
+        }
+    });
+
+    const plainTransportPeer = {
+        id          : uuidv4(),
+        socket      : { notify: () => {} }, // dummy socket
+        displayName : 'gstreamer',
+        transports  : {
+            audio : audioTransport,
+            video : videoTransport
+        },
+        producers : new Map(),
+        consumers : undefined,
+        gProcess  : undefined
+    };
+
+    plainTransportPeer.producers.set(audioProducer.id, audioProducer);
+    plainTransportPeer.producers.set(videoProducer.id, videoProducer);
+
+    return plainTransportPeer;
+
+}
+
+async function createPlainTransportStream(gstreamerCwd, externalMediaPath) {
+    
+    const peer = await createPlainTransportPeer();
+
+    peer.gProcess = gProducer({
+        externalMediaPath,
+        gstreamerCwd,
+        videoPT                : config.server.wrtc.mediaCodecs[1].payloadType,
+        videoSsrc              : VIDEO_SSRC,
+        videoTransportIp       : peer.transports.video.tuple.localIp,
+        videoTransportPort     : peer.transports.video.tuple.localPort,
+        videoTransportRtcpPort : peer.transports.video.rtcpTuple.localPort,
+        audioPT                : config.server.wrtc.mediaCodecs[0].payloadType,
+        audioSsrc              : AUDIO_SSRC,
+        audioTransportIp       : peer.transports.audio.tuple.localIp,
+        audioTransportPort     : peer.transports.audio.tuple.localPort,
+        audioTransportRtcpPort : peer.transports.audio.rtcpTuple.localPort
+
+    });
+
+    onlinePeers.set(peer.id, peer);
 }
