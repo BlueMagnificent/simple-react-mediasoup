@@ -21,7 +21,9 @@ module.exports = ({
 }) => {
 
     let gstreamerProcess = undefined;
-    
+
+    // Obtained from mediasoup-demo
+    // https://github.com/versatica/mediasoup-demo/blob/85fa4a46db153dbb4a3de78f4153ac5072a60b96/broadcasters/gstreamer.sh#L174C1-L196C116
     const commandArgs = [ 
         `rtpbin name=rtpbin filesrc location=${externalMediaPath}`,
         '! qtdemux name=demux demux.video_0',
