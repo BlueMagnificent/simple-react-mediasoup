@@ -33,14 +33,25 @@ npm run client
 ```
 Running the client part will call-up `localhost:3031` in a browser.
 
-### External media
-This project also demonstrates how to use `PlainTransport` to pipe in external media into mediasoup. This is archieved using [gstreamer](https://gstreamer.freedesktop.org/) and hence should be installed on your system if you want to try this feature. Also update the values for `server.gstreamer.cwd` and `server.gstreamer.externalMediaPath` in `config.js` to the working directory of your installed `gstreamer` and path of the external media to play respectively. For example:
-```javascript
-gstreamer: {
-  cwd: '/gstreamer/installation/bin',
-  externalMediaPath: '/path/to/your/external/media.mp4'
-}
-```
+### Streaming From and To External media
+This project also features the use of `PlainTransport` to consume media from an exernal endpoint and to stream media to an external endpoint. This is archieved using [gstreamer](https://gstreamer.freedesktop.org/) and should be installed on your system if you want to try this out. 
+
+_(A good part of the codes used for these features were gratefully obtained from [mediasoup-demo](https://github.com/versatica/mediasoup-demo) and [mediasoup3-record-demo](https://github.com/ethand91/mediasoup3-record-demo))_
+
+#### Consume media from external endpoint
+This makes use of gstreamer to stream audio and video from a locally saved video file into mediasoup. To enable this, the following values in `config.js` file must be provided 
+- `server.gstreamer.cwd`: A working directory where gstreamers's `gst-launch-1.0` CLI tool is accessible
+- `server.gstreamer.externalMediaFile`: The full file path of a video file to stream into mediasoup.
+
+When this feature is enabled, a peer with display name "gstreamer" gets added to the online peers
+
+#### Streaming media to external endpoint
+This features uses gstreamer to record the audio and video stream of a peer to a file. With this feature enabled, the stream of the first peer to join gets recorded. When the peer leaves, the recording is saved and the next available peer is picked up, and so on. To enable this feature, the following values in `config.js` file must be provided:
+- `server.gstreamer.cwd`: A working directory where gstreamers's `gst-launch-1.0` CLI tool is accessible (same case as the "Consume media from external endpoint" section above) 
+- `server.gstreamer.mediaSavePath`: The full directory path to save the recorded file. The actually file name is of the pattern `"{peer.displayName}_{timestamp}.webm"`
+
+
+
 
 ### Installation Issues
 If you encounter any issue while installing mediasoup then please reference the [installation doc of mediasoup](https://mediasoup.org/documentation/v3/mediasoup/installation).

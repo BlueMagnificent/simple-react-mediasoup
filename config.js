@@ -5,10 +5,11 @@ module.exports = {
         },
         gstreamer: {
             cwd: '',
-            externalMediaPath: '',
+            externalMediaFile: '',
+            mediaSavePath: '',
         },
         wrtc:{
-            ip: '',
+            ip: '192.168.45.107',
             protocol: 'udp',
             port: 44444,
             logLevel : 'warn',
@@ -40,7 +41,7 @@ module.exports = {
                 parameters : {
                     'x-google-start-bitrate' : 1000
                 }
-            } ] 
+            } ]
         }
 
     },
