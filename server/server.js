@@ -1,4 +1,4 @@
-process.env.DEBUG = 'mediasoup*';
+process.env.DEBUG = 'mediasoup*,simple-react-mediasoup*';
 
 const path = require('path');
 const express = require('express');
@@ -6,24 +6,47 @@ const { v4: uuidv4 } = require('uuid');
 const SockRR = require('./libs/sockrr-server');
 const mediasoup = require('mediasoup');
 const config = require('../config');
+const { gProducer, gConsumer } = require('./libs/g-streamer');
+const { getPort } = require('./libs/port');
+const logger = require('./libs/logger')('server');
 
 const onlinePeers = new Map();
 
 let mRouter;
 let wrtcServer;
 
-start();
+const AUDIO_SSRC = 1111;
+const VIDEO_SSRC = 2222;
 
-function start() {
+let recordingInProgress = false;
+
+start()
+.catch((err) => {
+    logger.error(err);
+    setTimeout(() => process.exit(1), 2000);
+});
+
+async function start() {
+
     const httpServer = createHttpServer();
 
     createSocketServer(httpServer);
     
-    setupMediasoup()
-        .catch((err) => {
-            console.error('error: could not set up mediasoup', err);
-            setTimeout(() => process.exit(1), 2000);
-        });
+    if(config.server.wrtc.ip === '') {
+        throw Error('wrtc ip not set');
+    }
+
+    await setupMediasoup();
+
+    const { cwd, externalMediaFile } = config.server.gstreamer;
+
+    // if gstreamer cwd and external media file is set then create an incoming stream
+    if (  cwd !== '' && externalMediaFile !== '' ) {
+        await createInComingStream(cwd, externalMediaFile);
+    }
+    else{
+        logger.info('cannot create plain transport incoming stream, gstreamer cwd or externalMediaFile not set');
+    }
 }
 
 function createHttpServer() {
@@ -34,7 +57,7 @@ function createHttpServer() {
     app.use(express.static(path.resolve(process.cwd(), 'public')));
     
     return app.listen(port, () => {
-        console.log(`server listening on port ${port}`);
+        logger.info(`server listening on port ${port}`);
     });
 }
 
@@ -55,10 +78,11 @@ function createSocketServer(httpServer) {
             producerTransport : undefined,
             consumerTransport : undefined,
             producers         : new Map(),
-            consumers         : new Map()
+            consumers         : new Map(),
+            gProcess          : undefined
         };
         
-        console.log(`new peer connected with id: ${peer.id}`);
+        logger.info(`new peer connected with id: ${peer.id}`);
 
         srr.onRequest(async (method, data = {}, accept, reject) => {
             try {
@@ -171,7 +195,7 @@ function createSocketServer(httpServer) {
                         peer.rtpCapabilities = rtpCapabilities;
                         peer.displayName = displayName;
                         onlinePeers.set(peer.id, peer);
-                        console.log(`${displayName} joined`);
+                        logger.info(`${displayName} joined`);
 
                         accept();
 
@@ -189,15 +213,21 @@ function createSocketServer(httpServer) {
                         // and also notify this peer of all other available peers
                         peer.socket.notify('setAvailablePeers', { otherPeerDetails });
 
+                        // if there is no recording in progress then initiate recording
+                        checkAndInitiateRecording(peer)
+                        .catch((err) => {
+                            logger.error('error initiating recording', err);
+                        });
+
                         break;
                     }
                     default:
-                        console.log(`${method} method has no case handler`);
+                        logger.info(`${method} method has no case handler`);
                         reject();
                 }
                 
             } catch (error) {
-                console.log('peer on request error', error);
+                logger.error('peer on request error', error);
                 reject(400, 'error occured');
             }
         });
@@ -218,19 +248,37 @@ function createSocketServer(httpServer) {
                 }
                 
             } catch (error) {
-                console.log('peer on notification error', error);
+                logger.error('peer on notification error', error);
             }
         });
         
         srr.onClose(() => {
+
             onlinePeers.delete(peer.id);
+
+            peer.producerTransport?.close();
+            peer.consumerTransport?.close();
+
+            if(peer.gProcess){
+                peer.gProcess.kill();
+                recordingInProgress = false;
+
+                peer.videoPlainTransport?.close();
+                peer.audioPlainTransport?.close();
+
+                // if there are still online peers then initiate recording for the next peer
+                checkAndInitiateRecording()
+                .catch((err) => {
+                    logger.error('error initiating recording', err);
+                });
+            }
 
             // notify other peers that this peer has left 
             for (const otherPeer of onlinePeers.values()) {
                 otherPeer.socket.notify('peerLeft', { id: peer.id });
             }
 
-            console.log(`peer: ${peer.id} closed`);
+            logger.info(`peer: ${peer.id} closed`);
         });
     });
 
@@ -244,7 +292,7 @@ async function setupMediasoup() {
     });
     
     mWorker.on('died', () => {
-        console.error('error: mediasoup worker died');
+        logger.error('error: mediasoup worker died');
         setTimeout(() => process.exit(1), 1000);
     });
 
@@ -281,12 +329,18 @@ async function createConsumer(peer, producer) {
 
     peer.consumers.set(consumer.id, consumer);
 
-    // handle Consumer events.
+    // handle consumer events
+    consumer.observer.on('close', () => {
+        logger.info(`consumer closed for consumer: ${consumer.id}`);
+    });
+
     consumer.on('transportclose', () => {
+        logger.info(`consumer's transport closed for consumer: ${consumer.id}`);
         peer.consumers.delete(consumer.id);
     });
 
     consumer.on('producerclose', () => {
+        logger.info(`consumer's producer closed for consumer: ${consumer.id}`);
         peer.consumers.delete(consumer.id);
     });
 
@@ -311,4 +365,228 @@ async function createWebRtcTransport() {
             dtlsParameters : transport.dtlsParameters
         }
     };
+}
+
+async function createInComingStream(gstreamerCwd, externalMediaFile) {
+
+    const videoTransport = await mRouter.createPlainTransport({
+        listenInfo: {
+            protocol: 'udp',
+            ip: config.server.wrtc.ip
+        },
+        rtcpMux  : false,
+        comedia  : true
+    });
+
+    const videoProducer = await videoTransport.produce({
+        kind          : 'video',
+        rtpParameters : {
+            codecs : [ config.server.wrtc.mediaCodecs[1] ],
+            encodings : [ {
+                ssrc : VIDEO_SSRC
+            } ]
+        }
+    });
+    
+    const audioTransport = await mRouter.createPlainTransport({
+        listenInfo: {
+            protocol: 'udp',
+            ip: config.server.wrtc.ip
+        },
+        rtcpMux  : false,
+        comedia  : true
+    });
+
+    const audioProducer = await audioTransport.produce({
+        kind          : 'audio',
+        rtpParameters : {
+            codecs : [ config.server.wrtc.mediaCodecs[0] ],
+            encodings : [ {
+                ssrc : AUDIO_SSRC
+            } ]
+        }
+    });
+
+    const peer = {
+        id          : uuidv4(),
+        socket      : { notify: () => {} }, // dummy socket
+        displayName : 'gstreamer',
+        transports  : {
+            audio : audioTransport,
+            video : videoTransport
+        },
+        producers : new Map(),
+        consumers : undefined,
+        gProcess  : undefined
+    };
+
+    peer.producers.set(videoProducer.id, videoProducer);
+    peer.producers.set(audioProducer.id, audioProducer);
+
+    onlinePeers.set(peer.id, peer);
+
+    peer.gProcess = gProducer({
+        externalMediaFile,
+        gstreamerCwd,
+        audioPT                : config.server.wrtc.mediaCodecs[0].payloadType,
+        videoSsrc              : VIDEO_SSRC,
+        videoTransportIp       : peer.transports.video.tuple.localIp,
+        videoTransportPort     : peer.transports.video.tuple.localPort,
+        videoTransportRtcpPort : peer.transports.video.rtcpTuple.localPort,
+        audioSsrc              : AUDIO_SSRC,
+        audioTransportIp       : peer.transports.audio.tuple.localIp,
+        audioTransportPort     : peer.transports.audio.tuple.localPort,
+        audioTransportRtcpPort : peer.transports.audio.rtcpTuple.localPort,
+        videoPT                : config.server.wrtc.mediaCodecs[1].payloadType
+    });
+
+}
+
+async function checkAndInitiateRecording(peer = null) {
+    
+    const { cwd, mediaSavePath } = config.server.gstreamer;
+
+    if (cwd === '' || mediaSavePath === '') {
+        logger.info('cannot create plain transport out going stream, gstreamer cwd or mediaSavePath not set');
+        return;
+    }
+
+    if(recordingInProgress) {
+        logger.info('A recorder already exists');
+        return;
+    }
+
+    // if peer is null then get the first online peer whose name is not gstreamer
+    if(!peer) {
+        for (const nextPeer of onlinePeers.values()) {
+            if(nextPeer.displayName !== 'gstreamer') {
+                peer = nextPeer;
+                break;
+            }
+        }
+    }
+
+    // if no peer is available to initiate recording then return
+    if(!peer) {
+        logger.info('no peer available to initiate recording');
+        return;
+    }
+
+    await createOutGoingStream(peer, cwd, mediaSavePath);
+
+    recordingInProgress = true;
+
+}
+
+async function createOutGoingStream(peer, cwd, mediaSavePath){
+
+    let videoProducer = undefined;
+    let audioProducer = undefined;
+
+    // here we assume there is only a video and an audio producer
+    for (const producer of peer.producers.values()) {
+        if (producer.kind === 'video')
+            videoProducer = producer;
+        else
+            audioProducer = producer;
+    }
+
+    if (!videoProducer || !audioProducer) {
+        throw Error('no video or audio producer found');
+    }
+    
+    // create out going plain transport stream for video and audio
+    const videoDetails = await publishToOutGoingStream(videoProducer);
+    const audioDetails = await publishToOutGoingStream(audioProducer);
+
+    const fullFilePath = path.join(mediaSavePath, `${peer.displayName}_${Date.now()}.webm`).split(`\\`).join( '/');;
+
+    // create a gstreamer process to consume the plain transport stream
+    peer.gProcess = gConsumer({
+        fullFilePath,
+        gstreamerCwd: cwd,
+        rtpDetails: {
+            video: videoDetails.rtpDetails,
+            audio: audioDetails.rtpDetails
+        }
+    });
+
+    // save the plain transport to the peer so
+    // it can be closed when the peer disconnects
+    peer.videoPlainTransport = videoDetails.transport;
+    peer.audioPlainTransport = audioDetails.transport;
+
+    // resume the consumers after 1 second
+    setTimeout(async () => {
+        await videoDetails.consumer.resume();
+        await audioDetails.consumer.resume();
+
+        logger.info('out going plain transport stream consumers resumed');
+    }, 1000);
+
+    logger.info(`out going plain transport stream created for ${peer.displayName} and saved at ${fullFilePath}`);
+
+}
+
+async function publishToOutGoingStream(producer) {
+
+    const transport = await mRouter.createPlainTransport({
+        listenInfo: {
+            protocol: 'udp',
+            ip: '127.0.0.1'
+        },
+        rtcpMux    : false,
+        comedia    : false
+    });
+
+    const remoteRtpPort = await getPort();
+    const remoteRtcpPort = await getPort();
+
+    await transport.connect({
+        ip: '127.0.0.1',
+        port: remoteRtpPort,
+        rtcpPort: remoteRtcpPort
+    });
+
+    const codecs = [];
+    
+    const routerCodec = mRouter.rtpCapabilities.codecs.find(
+        codec => codec.kind === producer.kind 
+    );
+
+    codecs.push(routerCodec);
+
+    const rtpCapabilities = {
+        codecs,
+        rtcpFeedback: []
+    };
+
+    // Start the consumer paused
+    // Once the gstreamer process is ready to consume resume and send a keyframe
+    const consumer = await transport.consume({
+        producerId: producer.id,
+        rtpCapabilities,
+        paused: true
+    });
+
+    consumer.on('transportclose', () => {
+        logger.info(`plain transport for consumer: ${consumer.id}`);
+    });
+
+    return {
+        transport,
+        consumer,
+        rtpDetails: {
+            remoteRtpPort,
+            remoteRtcpPort,
+            localRtcpPort: transport.rtcpTuple ? transport.rtcpTuple.localPort : undefined,
+            payloadType: consumer.rtpParameters.codecs[0].payloadType,
+            codecName: consumer.rtpParameters.codecs[0].mimeType.split('/')[1].toUpperCase(),
+            clockRate: consumer.rtpParameters.codecs[0].clockRate,
+            channels: consumer.rtpParameters.codecs[0]?.channels,
+            ssrc: consumer.rtpParameters.encodings[0].ssrc,
+            rtpCname: consumer.rtpParameters.rtcp.cname?.toUpperCase()
+        }
+    }
+
 }
