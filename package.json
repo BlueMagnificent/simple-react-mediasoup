@@ -13,6 +13,7 @@
   ],
   "description": "A simple nodejs mediasoup application with a react frontend",
   "dependencies": {
+    "debug": "^4.3.7",
     "express": "^4.19.2",
     "mediasoup": "^3.15.1",
     "mediasoup-client": "^3.7.12",
