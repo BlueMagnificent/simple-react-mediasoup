@@ -6,11 +6,15 @@
     "server": "node server/server.js",
     "start": "webpack --config ./client/webpack.config.js --mode production && node server/server.js"
   },
-  "keywords": ["mediasoup", "react", "webrtc"],
+  "keywords": [
+    "mediasoup",
+    "react",
+    "webrtc"
+  ],
   "description": "A simple nodejs mediasoup application with a react frontend",
   "dependencies": {
     "express": "^4.19.2",
-    "mediasoup": "^3.14.8",
+    "mediasoup": "^3.15.1",
     "mediasoup-client": "^3.7.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
